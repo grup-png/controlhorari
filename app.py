@@ -7,48 +7,47 @@ from streamlit_js_eval import get_geolocation
 # --- 1. CONFIGURACIÓ DE LA PÀGINA ---
 st.set_page_config(page_title="Outdoor", page_icon="🌲", layout="centered")
 
-# --- 2. CSS PERSONALITZAT (ESTILS I COLORS) ---
-# Això és el que fa la màgia dels colors i la mida dels botons
+# --- 2. CSS EXTREM (COLORS I MIDES) ---
 st.markdown("""
     <style>
-    /* 1. Centrar el títol */
+    /* 1. Títol Centrat */
     h1 {
         text-align: center;
-        margin-bottom: 30px;
+        margin-top: -20px;
     }
-    
-    /* 2. Estil general dels botons (Grans i negreta) */
+
+    /* 2. Estil base per a TOTS els botons (Gegants) */
     div.stButton > button {
-        width: 100%;            /* Ocupar tot l'ample */
-        height: 80px;           /* Més alts */
-        font-size: 24px !important; /* Lletra gran */
-        font-weight: 800 !important; /* Lletra gruixuda */
-        border-radius: 12px;    /* Bordes arrodonits */
+        height: 90px;                 /* Molt alts */
+        font-size: 30px !important;   /* Lletra gegant */
+        font-weight: 900 !important;  /* Negreta */
+        border-radius: 15px;          /* Cantonades rodones */
         border: none;
-        margin-bottom: 10px;
+        width: 100%;                  /* Ocupar tot l'ample disponible */
+        box-shadow: 0px 4px 6px rgba(0,0,0,0.2); /* Ombra suau */
     }
 
-    /* 3. Botó d'ENTRADA (Verd) - És el primer botó que apareix */
-    div.stButton:nth-of-type(1) > button {
-        background-color: #28a745 !important; /* Verd intens */
+    /* 3. Botó ENTRADA (Verd) - El detectem perquè és tipus 'secondary' */
+    button[kind="secondary"] {
+        background-color: #2eb82e !important; /* Verd gespa fort */
         color: white !important;
+    }
+    button[kind="secondary"]:active {
+        background-color: #248f24 !important; /* Verd fosc al clicar */
+    }
+
+    /* 4. Botó SORTIDA (Vermell) - El detectem perquè és tipus 'primary' */
+    button[kind="primary"] {
+        background-color: #ff3333 !important; /* Vermell fort */
+        color: white !important;
+    }
+    button[kind="primary"]:active {
+        background-color: #cc0000 !important; /* Vermell fosc al clicar */
     }
     
-    /* 4. Efecte quan passes per sobre (Entrada) */
-    div.stButton:nth-of-type(1) > button:hover {
-        background-color: #218838 !important;
-    }
-
-    /* 5. Botó de SORTIDA (Vermell) - És el segon botó que apareix */
-    div.stButton:nth-of-type(2) > button {
-        background-color: #dc3545 !important; /* Vermell intens */
-        color: white !important;
-    }
-
-    /* 6. Efecte quan passes per sobre (Sortida) */
-    div.stButton:nth-of-type(2) > button:hover {
-        background-color: #c82333 !important;
-    }
+    /* Amagar el menú de dalt a la dreta i el peu de pàgina per neteja */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -71,18 +70,15 @@ try:
         mapa_treballadors = {}
         llista_noms = []
 except Exception as e:
-    st.error(f"Error carregant dades: {e}")
     mapa_treballadors = {}
     llista_noms = []
 
-# --- 5. TÍTOL CENTRAT ---
-# Utilitzem markdown per centrar-ho ja que st.title no deixa per defecte
+# --- 5. TÍTOL ---
 st.markdown("<h1>Control Horari Outdoor</h1>", unsafe_allow_html=True)
 
 if mapa_treballadors:
     
-    # --- 6. RECORDAR USUARI (Lògica de Query Params) ---
-    # Mirem si a l'enllaç web hi ha un nom guardat (?nom=Pep)
+    # --- 6. RECORDAR USUARI (Automàtic) ---
     query_params = st.query_params
     nom_per_defecte = query_params.get("nom", None)
     
@@ -90,40 +86,47 @@ if mapa_treballadors:
     if nom_per_defecte in llista_noms:
         index_inicial = llista_noms.index(nom_per_defecte)
 
-    # El Desplegable
+    # Desplegable
     nom_seleccionat = st.selectbox(
-        "Qui ets?", 
+        "Identifica't:", 
         llista_noms, 
         index=index_inicial
     )
     
-    # Guardem la selecció a la URL per la propera vegada
+    # Actualitzem la URL si canvia el nom (per la propera vegada)
     if nom_seleccionat != nom_per_defecte:
         st.query_params["nom"] = nom_seleccionat
     
-    # Recuperem el DNI
     dni_actual = mapa_treballadors[nom_seleccionat]
 
     st.write("---")
 
     # --- 7. GPS I BOTONS ---
+    # Obtenim la ubicació
     loc = get_geolocation()
 
     if loc:
         latitud = loc['coords']['latitude']
         longitud = loc['coords']['longitude']
         
-        # Missatge GPS discret
-        st.caption(f"📡 GPS: {latitud:.4f}, {longitud:.4f}")
+        # Mostrem coordenades petites
+        st.caption(f"📍 GPS Actiu: {latitud:.4f}, {longitud:.4f}")
 
-        # BOTÓ 1: ENTRADA (Es pintarà VERD pel CSS de dalt)
-        if st.button("ENTRADA"):
+        # --- BOTONS GEGANTS (UN SOTA L'ALTRE) ---
+        
+        # BOTÓ VERD (ENTRADA)
+        # use_container_width=True -> Fa que ocupi tot l'ample del mòbil
+        # type="secondary" -> El nostre CSS el pinta de VERD
+        if st.button("ENTRADA", type="secondary", use_container_width=True):
             accio = "Entrada"
         else:
             accio = None
             
-        # BOTÓ 2: SORTIDA (Es pintarà VERMELL pel CSS de dalt)
-        if st.button("SORTIDA"):
+        st.write("") # Espai buit entre botons per estètica
+        
+        # BOTÓ VERMELL (SORTIDA)
+        # type="primary" -> El nostre CSS el pinta de VERMELL
+        if st.button("SORTIDA", type="primary", use_container_width=True):
             accio = "Sortida"
 
         # --- 8. GUARDAR DADES ---
@@ -142,12 +145,12 @@ if mapa_treballadors:
             try:
                 supabase.table("fitxar").insert(dades_a_guardar).execute()
                 st.balloons()
-                st.success(f"✅ {accio} OK: {ara.strftime('%H:%M')}")
+                st.success(f"✅ {accio} CORRECTA: {ara.strftime('%H:%M')}")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error guardant: {e}")
 
     else:
-        st.warning("⏳ Buscant satèl·lits GPS...")
+        st.warning("📡 Buscant satèl·lits... (Espera uns segons)")
 
 else:
-    st.info("No hi ha treballadors a la base de dades.")
+    st.error("No hi ha treballadors a la base de dades.")
