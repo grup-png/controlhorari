@@ -2,12 +2,13 @@ import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import pytz
-from streamlit_js_eval import get_geolocation
+# Importem també get_user_agent per saber el model
+from streamlit_js_eval import get_geolocation, get_user_agent
 
 # --- 1. CONFIGURACIÓ DE LA PÀGINA ---
 st.set_page_config(page_title="Outdoor", page_icon="🌲", layout="centered")
 
-# --- 2. CSS EXTREM (COLORS I MIDES) ---
+# --- 2. CSS PERSONALITZAT (ESTILS I COLORS) ---
 st.markdown("""
     <style>
     /* 1. Títol Centrat */
@@ -45,7 +46,6 @@ st.markdown("""
         background-color: #cc0000 !important; /* Vermell fosc al clicar */
     }
     
-    /* Amagar el menú de dalt a la dreta i el peu de pàgina per neteja */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     </style>
@@ -93,7 +93,7 @@ if mapa_treballadors:
         index=index_inicial
     )
     
-    # Actualitzem la URL si canvia el nom (per la propera vegada)
+    # Actualitzem la URL
     if nom_seleccionat != nom_per_defecte:
         st.query_params["nom"] = nom_seleccionat
     
@@ -101,9 +101,13 @@ if mapa_treballadors:
 
     st.write("---")
 
-    # --- 7. GPS I BOTONS ---
-    # Obtenim la ubicació
+    # --- 7. OBTENIR DADES TÈCNIQUES (GPS I MÒBIL) ---
+    
+    # A) Geolocalització
     loc = get_geolocation()
+    
+    # B) Informació del dispositiu (User Agent)
+    info_mobil = get_user_agent()
 
     if loc:
         latitud = loc['coords']['latitude']
@@ -112,20 +116,17 @@ if mapa_treballadors:
         # Mostrem coordenades petites
         st.caption(f"📍 GPS Actiu: {latitud:.4f}, {longitud:.4f}")
 
-        # --- BOTONS GEGANTS (UN SOTA L'ALTRE) ---
+        # --- BOTONS GEGANTS ---
         
-        # BOTÓ VERD (ENTRADA)
-        # use_container_width=True -> Fa que ocupi tot l'ample del mòbil
-        # type="secondary" -> El nostre CSS el pinta de VERD
+        # ENTRADA (VERD)
         if st.button("ENTRADA", type="secondary", use_container_width=True):
             accio = "Entrada"
         else:
             accio = None
             
-        st.write("") # Espai buit entre botons per estètica
+        st.write("") 
         
-        # BOTÓ VERMELL (SORTIDA)
-        # type="primary" -> El nostre CSS el pinta de VERMELL
+        # SORTIDA (VERMELL)
         if st.button("SORTIDA", type="primary", use_container_width=True):
             accio = "Sortida"
 
@@ -134,12 +135,16 @@ if mapa_treballadors:
             zona = pytz.timezone("Europe/Madrid")
             ara = datetime.now(zona)
             
+            # Assegurem que tenim informació del mòbil, si no posem "Desconegut"
+            model_mobil = info_mobil if info_mobil else "Desconegut"
+            
             dades_a_guardar = {
                 "dni_treballador": dni_actual,
                 "tipus": accio,
                 "data_hora": ara.isoformat(),
                 "latitud": latitud,
-                "longitud": longitud
+                "longitud": longitud,
+                "mobil": str(model_mobil)  # Guardem el model del mòbil (Nou Camp)
             }
 
             try:
