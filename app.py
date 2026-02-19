@@ -5,96 +5,149 @@ import pytz
 from streamlit_js_eval import get_geolocation
 
 # --- 1. CONFIGURACIÓ DE LA PÀGINA ---
-st.set_page_config(page_title="Fitxatge", page_icon="📍", layout="centered")
+st.set_page_config(page_title="Outdoor", page_icon="🌲", layout="centered")
 
-# --- 2. CONNEXIÓ AMB SUPABASE ---
+# --- 2. CSS PERSONALITZAT (ESTILS I COLORS) ---
+# Això és el que fa la màgia dels colors i la mida dels botons
+st.markdown("""
+    <style>
+    /* 1. Centrar el títol */
+    h1 {
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    
+    /* 2. Estil general dels botons (Grans i negreta) */
+    div.stButton > button {
+        width: 100%;            /* Ocupar tot l'ample */
+        height: 80px;           /* Més alts */
+        font-size: 24px !important; /* Lletra gran */
+        font-weight: 800 !important; /* Lletra gruixuda */
+        border-radius: 12px;    /* Bordes arrodonits */
+        border: none;
+        margin-bottom: 10px;
+    }
+
+    /* 3. Botó d'ENTRADA (Verd) - És el primer botó que apareix */
+    div.stButton:nth-of-type(1) > button {
+        background-color: #28a745 !important; /* Verd intens */
+        color: white !important;
+    }
+    
+    /* 4. Efecte quan passes per sobre (Entrada) */
+    div.stButton:nth-of-type(1) > button:hover {
+        background-color: #218838 !important;
+    }
+
+    /* 5. Botó de SORTIDA (Vermell) - És el segon botó que apareix */
+    div.stButton:nth-of-type(2) > button {
+        background-color: #dc3545 !important; /* Vermell intens */
+        color: white !important;
+    }
+
+    /* 6. Efecte quan passes per sobre (Sortida) */
+    div.stButton:nth-of-type(2) > button:hover {
+        background-color: #c82333 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 3. CONNEXIÓ AMB SUPABASE ---
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(url, key)
 except Exception as e:
-    st.error("Error de connexió. Revisa els 'Secrets' de Streamlit.")
+    st.error("Error de connexió. Revisa els 'Secrets'.")
     st.stop()
 
-# --- 3. CARREGAR TREBALLADORS (Taula: treballador) ---
+# --- 4. CARREGAR TREBALLADORS ---
 try:
-    # Atenció: Busquem a la taula 'treballador' (singular)
     response = supabase.table("treballador").select("dni, nom").execute()
-    
-    # Creem un diccionari per saber quin DNI té cada NOM
     if response.data:
         mapa_treballadors = {t['nom']: t['dni'] for t in response.data}
+        llista_noms = list(mapa_treballadors.keys())
     else:
         mapa_treballadors = {}
-        
+        llista_noms = []
 except Exception as e:
-    st.error(f"Error carregant la taula 'treballador': {e}")
+    st.error(f"Error carregant dades: {e}")
     mapa_treballadors = {}
+    llista_noms = []
 
-# --- 4. DISSENY DE L'APP ---
-st.title("📍 Control Horari")
+# --- 5. TÍTOL CENTRAT ---
+# Utilitzem markdown per centrar-ho ja que st.title no deixa per defecte
+st.markdown("<h1>Control Horari Outdoor</h1>", unsafe_allow_html=True)
 
 if mapa_treballadors:
-    # A. SELECCIÓ DE L'USUARI
-    nom_seleccionat = st.selectbox("Selecciona el teu nom:", list(mapa_treballadors.keys()))
     
-    # Recuperem el DNI internament
+    # --- 6. RECORDAR USUARI (Lògica de Query Params) ---
+    # Mirem si a l'enllaç web hi ha un nom guardat (?nom=Pep)
+    query_params = st.query_params
+    nom_per_defecte = query_params.get("nom", None)
+    
+    index_inicial = 0
+    if nom_per_defecte in llista_noms:
+        index_inicial = llista_noms.index(nom_per_defecte)
+
+    # El Desplegable
+    nom_seleccionat = st.selectbox(
+        "Qui ets?", 
+        llista_noms, 
+        index=index_inicial
+    )
+    
+    # Guardem la selecció a la URL per la propera vegada
+    if nom_seleccionat != nom_per_defecte:
+        st.query_params["nom"] = nom_seleccionat
+    
+    # Recuperem el DNI
     dni_actual = mapa_treballadors[nom_seleccionat]
 
     st.write("---")
 
-    # B. OBTENCIÓ DEL GPS
-    # Això demanarà permís al mòbil per saber on ets
+    # --- 7. GPS I BOTONS ---
     loc = get_geolocation()
 
     if loc:
-        # Si tenim GPS, guardem les coordenades
         latitud = loc['coords']['latitude']
         longitud = loc['coords']['longitude']
         
-        st.success(f"📡 Ubicació detectada")
+        # Missatge GPS discret
+        st.caption(f"📡 GPS: {latitud:.4f}, {longitud:.4f}")
 
-        # C. BOTONS D'ACCIÓ (ENTRADA / SORTIDA)
-        col1, col2 = st.columns(2)
-        accio = None
+        # BOTÓ 1: ENTRADA (Es pintarà VERD pel CSS de dalt)
+        if st.button("ENTRADA"):
+            accio = "Entrada"
+        else:
+            accio = None
+            
+        # BOTÓ 2: SORTIDA (Es pintarà VERMELL pel CSS de dalt)
+        if st.button("SORTIDA"):
+            accio = "Sortida"
 
-        with col1:
-            if st.button("🟢 ENTRADA", use_container_width=True):
-                accio = "Entrada"
-        
-        with col2:
-            if st.button("🔴 SORTIDA", use_container_width=True):
-                accio = "Sortida"
-
-        # D. GUARDAR A LA BASE DE DADES (Taula: fitxar)
+        # --- 8. GUARDAR DADES ---
         if accio:
-            # 1. Agafem la data i hora actual de la zona correcta
             zona = pytz.timezone("Europe/Madrid")
             ara = datetime.now(zona)
             
-            # 2. Preparem les dades EXACTES per a la taula 'fitxar'
             dades_a_guardar = {
-                "dni_treballador": dni_actual,  # Camp 'dni_treballador'
-                "tipus": accio,                 # Camp 'tipus'
-                "data_hora": ara.isoformat(),   # Camp 'data_hora' (Tot junt)
-                "latitud": latitud,             # Camp 'latitud'
-                "longitud": longitud            # Camp 'longitud'
+                "dni_treballador": dni_actual,
+                "tipus": accio,
+                "data_hora": ara.isoformat(),
+                "latitud": latitud,
+                "longitud": longitud
             }
 
             try:
-                # Inserim a la taula 'fitxar'
                 supabase.table("fitxar").insert(dades_a_guardar).execute()
-                
-                # Missatge d'èxit
                 st.balloons()
-                st.success(f"✅ {accio} registrada correctament per a {nom_seleccionat}!")
-                st.info(f"Hora: {ara.strftime('%d/%m/%Y %H:%M:%S')}")
-            
+                st.success(f"✅ {accio} OK: {ara.strftime('%H:%M')}")
             except Exception as e:
-                st.error(f"Error al guardar a la taula 'fitxar': {e}")
+                st.error(f"Error: {e}")
 
     else:
-        st.warning("⏳ Esperant senyal GPS... (Activa la ubicació o refresca la pàgina)")
+        st.warning("⏳ Buscant satèl·lits GPS...")
 
 else:
-    st.info("No s'han trobat dades a la taula 'treballador'.")
+    st.info("No hi ha treballadors a la base de dades.")
