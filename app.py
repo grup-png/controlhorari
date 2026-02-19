@@ -2,7 +2,6 @@ import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import pytz
-# Importem també get_user_agent per saber el model
 from streamlit_js_eval import get_geolocation, get_user_agent
 
 # --- 1. CONFIGURACIÓ DE LA PÀGINA ---
@@ -11,39 +10,41 @@ st.set_page_config(page_title="Outdoor", page_icon="🌲", layout="centered")
 # --- 2. CSS PERSONALITZAT (ESTILS I COLORS) ---
 st.markdown("""
     <style>
-    /* 1. Títol Centrat */
-    h1 {
-        text-align: center;
-        margin-top: -20px;
-    }
+    h1 { text-align: center; margin-top: -20px; }
 
-    /* 2. Estil base per a TOTS els botons (Gegants) */
+    /* Estil base botons */
     div.stButton > button {
-        height: 90px;                 /* Molt alts */
-        font-size: 30px !important;   /* Lletra gegant */
-        font-weight: 900 !important;  /* Negreta */
-        border-radius: 15px;          /* Cantonades rodones */
+        height: 90px;
+        font-size: 30px !important;
+        font-weight: 900 !important;
+        border-radius: 15px;
         border: none;
-        width: 100%;                  /* Ocupar tot l'ample disponible */
-        box-shadow: 0px 4px 6px rgba(0,0,0,0.2); /* Ombra suau */
+        width: 100%;
+        box-shadow: 0px 4px 6px rgba(0,0,0,0.2);
     }
 
-    /* 3. Botó ENTRADA (Verd) - El detectem perquè és tipus 'secondary' */
+    /* ENTRADA (Verd) - secondary */
     button[kind="secondary"] {
-        background-color: #2eb82e !important; /* Verd gespa fort */
+        background-color: #2eb82e !important;
         color: white !important;
     }
-    button[kind="secondary"]:active {
-        background-color: #248f24 !important; /* Verd fosc al clicar */
+    /* Si està deshabilitat (disabled), el posem gris fluix */
+    button[kind="secondary"]:disabled {
+        background-color: #e6ffe6 !important;
+        color: #b3b3b3 !important;
+        cursor: not-allowed;
     }
 
-    /* 4. Botó SORTIDA (Vermell) - El detectem perquè és tipus 'primary' */
+    /* SORTIDA (Vermell) - primary */
     button[kind="primary"] {
-        background-color: #ff3333 !important; /* Vermell fort */
+        background-color: #ff3333 !important;
         color: white !important;
     }
-    button[kind="primary"]:active {
-        background-color: #cc0000 !important; /* Vermell fosc al clicar */
+    /* Si està deshabilitat (disabled), el posem gris fluix */
+    button[kind="primary"]:disabled {
+        background-color: #ffe6e6 !important;
+        color: #b3b3b3 !important;
+        cursor: not-allowed;
     }
     
     #MainMenu {visibility: hidden;}
@@ -51,13 +52,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CONNEXIÓ AMB SUPABASE ---
+# --- 3. CONNEXIÓ SUPABASE ---
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(url, key)
 except Exception as e:
-    st.error("Error de connexió. Revisa els 'Secrets'.")
+    st.error("Error de connexió.")
     st.stop()
 
 # --- 4. CARREGAR TREBALLADORS ---
@@ -69,7 +70,7 @@ try:
     else:
         mapa_treballadors = {}
         llista_noms = []
-except Exception as e:
+except:
     mapa_treballadors = {}
     llista_noms = []
 
@@ -78,7 +79,7 @@ st.markdown("<h1>Control Horari Outdoor</h1>", unsafe_allow_html=True)
 
 if mapa_treballadors:
     
-    # --- 6. RECORDAR USUARI (Automàtic) ---
+    # --- 6. IDENTIFICACIÓ ---
     query_params = st.query_params
     nom_per_defecte = query_params.get("nom", None)
     
@@ -86,14 +87,8 @@ if mapa_treballadors:
     if nom_per_defecte in llista_noms:
         index_inicial = llista_noms.index(nom_per_defecte)
 
-    # Desplegable
-    nom_seleccionat = st.selectbox(
-        "Identifica't:", 
-        llista_noms, 
-        index=index_inicial
-    )
+    nom_seleccionat = st.selectbox("Identifica't:", llista_noms, index=index_inicial)
     
-    # Actualitzem la URL
     if nom_seleccionat != nom_per_defecte:
         st.query_params["nom"] = nom_seleccionat
     
@@ -101,41 +96,64 @@ if mapa_treballadors:
 
     st.write("---")
 
-    # --- 7. OBTENIR DADES TÈCNIQUES (GPS I MÒBIL) ---
-    
-    # A) Geolocalització
+    # --- 7. CONSULTAR ESTAT ACTUAL (LÒGICA DE BLOQUEIG) ---
+    # Busquem l'últim fitxatge d'aquesta persona
+    estat_dins = False # Per defecte assumim que està fora
+    try:
+        ultim_mov = supabase.table("fitxar")\
+            .select("tipus")\
+            .eq("dni_treballador", dni_actual)\
+            .order("data_hora", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if ultim_mov.data:
+            darrer_tipus = ultim_mov.data[0]['tipus']
+            if darrer_tipus == "Entrada":
+                estat_dins = True
+    except:
+        pass # Si falla la consulta, assumim que està fora
+
+    # --- 8. GPS I MÒBIL ---
     loc = get_geolocation()
-    
-    # B) Informació del dispositiu (User Agent)
     info_mobil = get_user_agent()
 
     if loc:
         latitud = loc['coords']['latitude']
         longitud = loc['coords']['longitude']
         
-        # Mostrem coordenades petites
-        st.caption(f"📍 GPS Actiu: {latitud:.4f}, {longitud:.4f}")
-
-        # --- BOTONS GEGANTS ---
-        
-        # ENTRADA (VERD)
-        if st.button("ENTRADA", type="secondary", use_container_width=True):
-            accio = "Entrada"
+        # Informació Visual de l'Estat
+        if estat_dins:
+            st.info(f"🟢 Hola {nom_seleccionat}, actualment estàs **treballant**.")
         else:
-            accio = None
-            
+            st.info(f"🔴 Hola {nom_seleccionat}, actualment estàs **fora**.")
+
+        st.caption(f"📍 GPS Actiu | 📱 Dispositiu detectat")
+
+        # --- 9. BOTONS GEGANTS (AMB BLOQUEIG) ---
+        
+        # ENTRADA (Verd) -> Només si ESTÀ FORA (estat_dins és False)
+        # disabled = estat_dins (Si està dins, botó desactivat)
+        btn_entrada = st.button("ENTRADA", type="secondary", use_container_width=True, disabled=estat_dins)
+        
         st.write("") 
         
-        # SORTIDA (VERMELL)
-        if st.button("SORTIDA", type="primary", use_container_width=True):
+        # SORTIDA (Vermell) -> Només si ESTÀ DINS (estat_dins és True)
+        # disabled = not estat_dins (Si NO està dins, botó desactivat)
+        btn_sortida = st.button("SORTIDA", type="primary", use_container_width=True, disabled=not estat_dins)
+
+        # Lògica d'acció
+        accio = None
+        if btn_entrada:
+            accio = "Entrada"
+        elif btn_sortida:
             accio = "Sortida"
 
-        # --- 8. GUARDAR DADES ---
+        # --- 10. GUARDAR DADES ---
         if accio:
             zona = pytz.timezone("Europe/Madrid")
             ara = datetime.now(zona)
             
-            # Assegurem que tenim informació del mòbil, si no posem "Desconegut"
             model_mobil = info_mobil if info_mobil else "Desconegut"
             
             dades_a_guardar = {
@@ -144,13 +162,22 @@ if mapa_treballadors:
                 "data_hora": ara.isoformat(),
                 "latitud": latitud,
                 "longitud": longitud,
-                "mobil": str(model_mobil)  # Guardem el model del mòbil (Nou Camp)
+                "mobil": str(model_mobil)
             }
 
             try:
                 supabase.table("fitxar").insert(dades_a_guardar).execute()
+                
+                # Feedback immediat i recàrrega per actualitzar els botons
                 st.balloons()
-                st.success(f"✅ {accio} CORRECTA: {ara.strftime('%H:%M')}")
+                st.success(f"✅ {accio} feta correctament a les {ara.strftime('%H:%M')}")
+                
+                # IMPORTANT: Esperem 2 segons i recarreguem la pàgina
+                # perquè els botons s'actualitzin (el Verd es bloquegi i el Vermell s'activi)
+                import time
+                time.sleep(2)
+                st.rerun()
+                
             except Exception as e:
                 st.error(f"Error guardant: {e}")
 
