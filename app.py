@@ -27,8 +27,8 @@ except Exception as e:
 # 3. CARREGUEM ELS TREBALLADORS
 # ---------------------------------------------------------
 try:
-    # Descarreguem DNI i NOM de la taula 'treballadors'
-    response = supabase.table("treballadors").select("dni, nom").execute()
+    # Descarreguem DNI i NOM de la taula 'treballador'
+    response = supabase.table("treballador").select("dni, nom").execute()
     llista_dades = response.data
     
     # Creem un diccionari: NOM -> DNI
