@@ -3,3 +3,4 @@ supabase
 pytz
 pandas
 streamlit-js-eval
+xlsxwriter
