@@ -1,160 +1,207 @@
 import streamlit as st
 from supabase import create_client, Client
-from datetime import datetime
-import pytz
-from streamlit_js_eval import get_geolocation, get_user_agent
+import pandas as pd
+from datetime import datetime, timedelta
+import io
 
-# --- 1. CONFIGURACIÓ DE LA PÀGINA ---
-st.set_page_config(page_title="Outdoor", page_icon="🌲", layout="centered")
+# --- 1. CONFIGURACIÓ ---
+st.set_page_config(page_title="Admin Outdoor", page_icon="📊", layout="centered")
 
-# --- 2. CSS PERSONALITZAT (ESTILS I COLORS) ---
+# CSS per centrar títol i estil del botó
 st.markdown("""
     <style>
-    h1 { text-align: center; margin-top: -20px; }
-
-    /* Estil base botons */
-    div.stButton > button {
-        height: 90px;
-        font-size: 30px !important;
-        font-weight: 900 !important;
-        border-radius: 15px;
-        border: none;
+    h1 { text-align: center; }
+    /* Estil per fer el botó més gran i net */
+    div.stDownloadButton > button {
         width: 100%;
-        box-shadow: 0px 4px 6px rgba(0,0,0,0.2);
+        background-color: white !important;
+        color: black !important;
+        border: 2px solid #ccc !important;
+        font-weight: bold !important;
+        height: 60px;
     }
-
-    /* ENTRADA (Verd) - secondary */
-    button[kind="secondary"] {
-        background-color: #2eb82e !important;
-        color: white !important;
+    div.stDownloadButton > button:hover {
+        background-color: #f0f0f0 !important;
+        border-color: #999 !important;
     }
-    /* Si està deshabilitat (disabled), el posem gris fluix */
-    button[kind="secondary"]:disabled {
-        background-color: #e6ffe6 !important;
-        color: #b3b3b3 !important;
-        cursor: not-allowed;
-    }
-
-    /* SORTIDA (Vermell) - primary */
-    button[kind="primary"] {
-        background-color: #ff3333 !important;
-        color: white !important;
-    }
-    /* Si està deshabilitat (disabled), el posem gris fluix */
-    button[kind="primary"]:disabled {
-        background-color: #ffe6e6 !important;
-        color: #b3b3b3 !important;
-        cursor: not-allowed;
-    }
-    
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CONNEXIÓ SUPABASE ---
+# --- 2. CONNEXIÓ SUPABASE ---
 try:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     supabase: Client = create_client(url, key)
-except Exception as e:
-    st.error("Error de connexió.")
+except:
+    st.error("Error connectant a Supabase.")
     st.stop()
 
-# --- 4. CARREGAR TREBALLADORS ---
-try:
-    response = supabase.table("treballador").select("dni, nom").execute()
-    if response.data:
-        mapa_treballadors = {t['nom']: t['dni'] for t in response.data}
-        llista_noms = list(mapa_treballadors.keys())
-    else:
-        mapa_treballadors = {}
-        llista_noms = []
-except:
-    mapa_treballadors = {}
-    llista_noms = []
+# --- 3. FUNCIONS AUXILIARS ---
+def obtenir_treballadors():
+    try:
+        response = supabase.table("treballador").select("dni, nom").execute()
+        return {t['nom']: t['dni'] for t in response.data}
+    except:
+        return {}
 
-# --- 5. TÍTOL ---
+def calcular_hores(df_mes):
+    """
+    Aquesta funció és el cervell. Organitza les dades per a l'Excel.
+    """
+    resultats = []
+    
+    # Agrupem per dia
+    dies = df_mes['data_hora'].dt.date.unique()
+    dies = sorted(dies)
+    
+    total_hores_mes = timedelta(0)
+
+    for dia in dies:
+        # Agafem fitxatges d'aquell dia
+        registres_dia = df_mes[df_mes['data_hora'].dt.date == dia].sort_values('data_hora')
+        
+        # Preparem la fila per l'Excel
+        fila = {'DATA': dia.strftime('%d/%m/%Y')}
+        
+        entrades = registres_dia[registres_dia['tipus'] == 'Entrada']['data_hora'].tolist()
+        sortides = registres_dia[registres_dia['tipus'] == 'Sortida']['data_hora'].tolist()
+        
+        # Emparellament (Entrada 1 -> Sortida 1, Entrada 2 -> Sortida 2...)
+        # Si algú s'oblida de fitxar sortida, el sistema agafa fins on pot.
+        max_parelles = max(len(entrades), len(sortides))
+        
+        temps_treballat_dia = timedelta(0)
+        
+        for i in range(max_parelles):
+            # Hora Entrada
+            hora_in = entrades[i].strftime('%H:%M') if i < len(entrades) else ""
+            fila[f'ENTRADA {i+1}'] = hora_in
+            
+            # Hora Sortida
+            hora_out = sortides[i].strftime('%H:%M') if i < len(sortides) else ""
+            fila[f'SORTIDA {i+1}'] = hora_out
+            
+            # Càlcul de temps
+            if i < len(entrades) and i < len(sortides):
+                t_in = entrades[i]
+                t_out = sortides[i]
+                diff = t_out - t_in
+                temps_treballat_dia += diff
+        
+        # Format del total dia (Hores:Minuts)
+        total_seconds = int(temps_treballat_dia.total_seconds())
+        hores, residu = divmod(total_seconds, 3600)
+        minuts, _ = divmod(residu, 60)
+        fila['TOTAL DIA'] = f"{hores:02}:{minuts:02}"
+        
+        resultats.append(fila)
+        total_hores_mes += temps_treballat_dia
+
+    return resultats, total_hores_mes
+
+# --- 4. INTERFÍCIE (UI) ---
 st.markdown("<h1>Control Horari Outdoor</h1>", unsafe_allow_html=True)
 
-if mapa_treballadors:
-    
-    # --- 6. IDENTIFICACIÓ ---
-    query_params = st.query_params
-    nom_per_defecte = query_params.get("nom", None)
-    
-    index_inicial = 0
-    if nom_per_defecte in llista_noms:
-        index_inicial = llista_noms.index(nom_per_defecte)
+treballadors = obtenir_treballadors()
 
-    nom_seleccionat = st.selectbox("Identifica't:", llista_noms, index=index_inicial)
+if treballadors:
+    # A. Selecció de Treballador
+    col1, col2 = st.columns(2)
+    with col1:
+        nom_seleccionat = st.selectbox("Selecciona Treballador", list(treballadors.keys()))
+        dni_seleccionat = treballadors[nom_seleccionat]
     
-    if nom_seleccionat != nom_per_defecte:
-        st.query_params["nom"] = nom_seleccionat
-    
-    dni_actual = mapa_treballadors[nom_seleccionat]
+    # B. Selecció de Calendari (Mes i Any)
+    with col2:
+        mesos = {
+            1: "Gener", 2: "Febrer", 3: "Març", 4: "Abril", 5: "Maig", 6: "Juny",
+            7: "Juliol", 8: "Agost", 9: "Setembre", 10: "Octubre", 11: "Novembre", 12: "Desembre"
+        }
+        col_mes, col_any = st.columns(2)
+        mes_actual = datetime.now().month
+        any_actual = datetime.now().year
+        
+        mes_triat_nom = col_mes.selectbox("Mes", list(mesos.values()), index=mes_actual-1)
+        any_triat = col_any.number_input("Any", value=any_actual, step=1)
+        
+        # Convertim el nom del mes a número (ex: "Febrer" -> 2)
+        mes_triat_num = list(mesos.keys())[list(mesos.values()).index(mes_triat_nom)]
 
     st.write("---")
 
-    # --- 7. CONSULTAR ESTAT ACTUAL (LÒGICA DE BLOQUEIG) ---
-    # Busquem l'últim fitxatge d'aquesta persona
-    estat_dins = False # Per defecte assumim que està fora
-    try:
-        ultim_mov = supabase.table("fitxar")\
-            .select("tipus")\
-            .eq("dni_treballador", dni_actual)\
-            .order("data_hora", desc=True)\
-            .limit(1)\
-            .execute()
+    # --- 5. GENERACIÓ DE L'INFORME ---
+    # Botó per pre-calcular (opcional, però va bé per debug)
+    # Aquí fem directament la lògica dins del download button per eficiència
+    
+    # Recuperem dades de Supabase
+    query = supabase.table("fitxar").select("*").eq("dni_treballador", dni_seleccionat).execute()
+    
+    buffer = io.BytesIO() # Memòria per guardar l'Excel
+    dades_disponibles = False
+    nom_fitxer = f"Informe_{nom_seleccionat}_{mes_triat_nom}_{any_triat}.xlsx"
+    
+    if query.data:
+        df = pd.DataFrame(query.data)
         
-        if ultim_mov.data:
-            darrer_tipus = ultim_mov.data[0]['tipus']
-            if darrer_tipus == "Entrada":
-                estat_dins = True
-    except:
-        pass # Si falla la consulta, assumim que està fora
-
-    # --- 8. GPS I MÒBIL ---
-    loc = get_geolocation()
-    info_mobil = get_user_agent()
-
-    if loc:
-        latitud = loc['coords']['latitude']
-        longitud = loc['coords']['longitude']
+        # Convertim columna text a datetime
+        df['data_hora'] = pd.to_datetime(df['data_hora'])
         
-        # Informació Visual de l'Estat
-        if estat_dins:
-            st.info(f"🟢 Hola {nom_seleccionat}, actualment estàs **treballant**.")
-        else:
-            st.info(f"🔴 Hola {nom_seleccionat}, actualment estàs **fora**.")
-
-        st.caption(f"📍 GPS Actiu | 📱 Dispositiu detectat")
-
-        # --- 9. BOTONS GEGANTS (AMB BLOQUEIG) ---
+        # Filtrem pel mes i any seleccionats
+        df_mes = df[
+            (df['data_hora'].dt.month == mes_triat_num) & 
+            (df['data_hora'].dt.year == any_triat)
+        ]
         
-        # ENTRADA (Verd) -> Només si ESTÀ FORA (estat_dins és False)
-        # disabled = estat_dins (Si està dins, botó desactivat)
-        btn_entrada = st.button("ENTRADA", type="secondary", use_container_width=True, disabled=estat_dins)
-        
-        st.write("") 
-        
-        # SORTIDA (Vermell) -> Només si ESTÀ DINS (estat_dins és True)
-        # disabled = not estat_dins (Si NO està dins, botó desactivat)
-        btn_sortida = st.button("SORTIDA", type="primary", use_container_width=True, disabled=not estat_dins)
-
-        # Lògica d'acció
-        accio = None
-        if btn_entrada:
-            accio = "Entrada"
-        elif btn_sortida:
-            accio = "Sortida"
-
-        # --- 10. GUARDAR DADES ---
-        if accio:
-            zona = pytz.timezone("Europe/Madrid")
-            ara = datetime.now(zona)
+        if not df_mes.empty:
+            dades_disponibles = True
             
-            model_mobil = info_mobil if info_mobil else "Desconegut"
+            # CALCULEM TOTES LES DADES
+            files_excel, total_mes_delta = calcular_hores(df_mes)
+            df_export = pd.DataFrame(files_excel)
             
-            dades_a_guardar = {
-                "dni_trebal
+            # Format total mes
+            sec_total = int(total_mes_delta.total_seconds())
+            hh, rem = divmod(sec_total, 3600)
+            mm, _ = divmod(rem, 60)
+            text_total_mes = f"{hh} hores i {mm} minuts"
+
+            # CREACIÓ DE L'EXCEL (Amb format maco)
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                # 1. Escriure les dades principals
+                df_export.to_excel(writer, sheet_name='Informe', startrow=4, index=False)
+                
+                workbook = writer.book
+                worksheet = writer.sheets['Informe']
+                
+                # 2. Formats
+                bold = workbook.add_format({'bold': True})
+                titol_format = workbook.add_format({'bold': True, 'font_size': 14})
+                
+                # 3. Encapçalament (Nom, DNI, Data)
+                worksheet.write('A1', f"NOM: {nom_seleccionat}", titol_format)
+                worksheet.write('A2', f"DNI: {dni_seleccionat}", bold)
+                worksheet.write('A3', f"PERÍODE: {mes_triat_nom} {any_triat}", bold)
+                
+                # 4. Total final a baix de tot
+                fila_final = 4 + len(df_export) + 2
+                worksheet.write(fila_final, 0, "TOTAL HORES MES:", bold)
+                worksheet.write(fila_final, 1, text_total_mes, bold)
+                
+                # Ajustar amplada columnes
+                worksheet.set_column(0, 0, 15) # Data
+                worksheet.set_column(1, 10, 12) # Entrades/Sortides
+
+    # --- 6. BOTÓ BLANC "INFORME" ---
+    if dades_disponibles:
+        st.download_button(
+            label="📄 INFORME",
+            data=buffer,
+            file_name=nom_fitxer,
+            mime="application/vnd.ms-excel"
+        )
+    else:
+        st.warning("No hi ha fitxatges per a aquest treballador en aquest mes.")
+        st.download_button("📄 INFORME (Buit)", data=b"", disabled=True)
+
+else:
+    st.info("No s'han trobat treballadors.")
