@@ -34,10 +34,10 @@ try:
     # Creem un diccionari: NOM -> DNI
     # Això ens permet mostrar el nom al desplegable però guardar el DNI internament
     if llista_dades:
-        mapa_treballadors = {item['nom']: item['dni'] for item in llista_dades}
-        noms_per_losta = list(mapa_treballadors.keys())
+        mapa_treballador = {item['nom']: item['dni'] for item in llista_dades}
+        noms_per_losta = list(mapa_treballador.keys())
     else:
-        mapa_treballadors = {}
+        mapa_treballador = {}
         noms_per_losta = []
 
 except Exception as e:
@@ -55,7 +55,7 @@ if noms_per_losta:
         nom_seleccionat = st.selectbox("Treballador/a:", noms_per_losta)
         
         # Recuperem el DNI ocultament
-        dni_real = mapa_treballadors[nom_seleccionat]
+        dni_real = mapa_treballador[nom_seleccionat]
         
         # B. Tipus de moviment
         tipus = st.radio("Acció:", ["Entrada", "Sortida"], horizontal=True)
